@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Cyberpunk Intrusion Detection System</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        #alerts-container {
+            height: 400px;
+            overflow-y: scroll;
+            border: 1px solid #00ff00;
+        }
+        #alerts-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        #deep-scan-results {
+            margin-top: 20px;
+            padding: 15px;
+            border: 1px solid #00ff00;
+            border-radius: 5px;
+            background-color: #1e1e1e;
+            color: #00ff00;
+            white-space: pre-wrap; /* Preserve newlines */
+            font-family: monospace;
+        }
+    </style>
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const socket = io();
+            const graphCanvas = document.getElementById('traffic-graph').getContext('2d');
+            let trafficChart;
+            const alertsList = document.getElementById('alerts-list');
+            let allTrafficData = [];
+            let currentBatchIndex = 0;
+            const batchSize = 20;
+
+            function displayBatch(data) {
+                alertsList.innerHTML = '';
+                const startIndex = currentBatchIndex * batchSize;
+                const endIndex = startIndex + batchSize;
+                const batch = data.slice(startIndex, endIndex);
+
+                batch.forEach(item => {
+                    const listItem = document.createElement('li');
+                    if (item.src_ip) {
+                        listItem.innerHTML = `<strong>IP Traffic:</strong> ${item.src_ip} -> ${item.dst_ip}`;
+                    }
+                    if (item.domain) {
+                        listItem.innerHTML = `<strong>Domain:</strong> ${item.domain}`;
+                    }
+                    alertsList.appendChild(listItem);
+                });
+
+                currentBatchIndex++;
+
+                if (endIndex >= data.length) {
+                    currentBatchIndex = 0;
+                }
+            }
+
+            socket.on('graph_data', (data) => {
+                const graphData = data.data;
+                const trafficData = data.traffic;
+                allTrafficData = trafficData;
+
+                if (trafficChart) {
+                    trafficChart.data.labels = Object.keys(graphData);
+                    trafficChart.data.datasets[0].data = Object.values(graphData);
+                    trafficChart.update();
+                } else {
+                    trafficChart = new Chart(graphCanvas, {
+                        type: 'line',
+                        data: {
+                            labels: Object.keys(graphData),
+                            datasets: [{
+                                label: 'Traffic Volume',
+                                data: Object.values(graphData),
+                                borderColor: '#00ff00',
+                                tension: 0.1,
+                            }],
+                        },
+                        options: {
+                            scales: {
+                                y: {
+                                    beginAtZero: true,
+                                    ticks: {
+                                        color: '#00ff00'
+                                    }
+                                },
+                                x: {
+                                    ticks: {
+                                        color: '#00ff00'
+                                    }
+                                }
+                            },
+                            plugins: {
+                                legend: {
+                                    labels: {
+                                        color: '#00ff00'
+                                    }
+                                }
+                            }
+                        },
+                    });
+                }
+
+                displayBatch(allTrafficData);
+            });
+
+            document.getElementById('file-upload').addEventListener('change', (event) => {
+                const file = event.target.files[0];
+                const formData = new FormData();
+                formData.append('file', file);
+
+                fetch('/scan_file', {
+                    method: 'POST',
+                    body: formData,
+                })
+                .then(response => response.json())
+                .then(data => {
+                    alert(data.message);
+                });
+            });
+
+            document.getElementById('deep-scan-form').addEventListener('submit', (event) => {
+                event.preventDefault();
+                const target = document.getElementById('target-ip').value;
+                fetch('/deep_scan', {
+                    method: 'POST',
+                    body: new URLSearchParams({ target: target }),
+                })
+                .then(response => response.json())
+                .then(data => {
+                    // Display the result in a more user-friendly way
+                    const resultsDiv = document.getElementById('deep-scan-results');
+                    let resultHTML = `<p><strong>${data.summary}</strong></p>`;
+                    resultHTML += `<p><strong>Details:</strong> ${data.details}</p>`;
+                    resultHTML += `<p><strong>Remediation:</strong> ${data.remediation}</p>`;
+                    resultsDiv.innerHTML = resultHTML;
+                    // Clear the input field after the scan
+                    document.getElementById('target-ip').value = '';
+                });
+            });
+        });
+    </script>
+</head>
+<body>
+    <h1>Cyberpunk Intrusion Detection System</h1>
+
+    <div class="graph-container">
+        <h2>Real-Time Traffic Volume (Packets/Second)</h2>
+        <p>This graph displays the real-time volume of network traffic, measured in packets per second.</p>
+        <canvas id="traffic-graph"></canvas>
+    </div>
+
+    <div class="traffic-container">
+        <h2>Network Traffic Details</h2>
+        <p>This section displays details about the network traffic, including IP addresses and domains.</p>
+        <div id="alerts-container">
+            <ul id="alerts-list"></ul>
+        </div>
+    </div>
+
+    <div class="file-upload-container">
+        <h2>Upload File for Scan</h2>
+        <p>Upload a file to scan for viruses and malware.</p>
+        <input type="file" id="file-upload">
+    </div>
+
+    <div class="deep-scan-container">
+        <h2>Deep Network Scan</h2>
+        <form id="deep-scan-form">
+            <input type="text" id="target-ip" placeholder="Target IP Address or Domain Name">
+            <button type="submit">Scan</button>
+        </form>
+        <div id="deep-scan-results"></div>  </div>
+</body>
+</html>
